@@ -172,7 +172,7 @@ struct HashMap {
 
     // Returns the value associated to k if exists, creates default otherwise.
     Value& operator[](const Key &k) {
-        if (!count(k)) add(pair(k, Value()));
+        if (!count(k)) add(KeyValuePair(k, Value()));
         return find(k)->second;
     }
 
