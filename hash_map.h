@@ -15,6 +15,10 @@
 *
 * All the iterators are invalidated during
 * insertion or deletion.
+* 
+* Second parameter h is used to lower hash calls.
+* h is equal to the hash function modulo table size.
+* h can get invalidated during insertion.
 */
 
 #include <list>
@@ -53,10 +57,8 @@ struct HashMap {
         }
     }
 
-    // Adds an element to the table, assumes key doesn't exist.
-    void add(const KeyValuePair &p) {
+    void add(const KeyValuePair &p, size_t h) {
         ++size_;
-        int h = geth(p.first);
         if (!used_[h]) {
             used_[h] = true;
             list_.push_back(p);
@@ -67,6 +69,11 @@ struct HashMap {
         }
     }
 
+    // Adds an element to the table, assumes key doesn't exist.
+    void add(const KeyValuePair &p) {
+        add(p, geth(p.first));
+    }
+
     // Adds all elements between two iterators.
     template<class It>
     void addit(It begin, It end) {
@@ -74,14 +81,52 @@ struct HashMap {
     }
 
     // Safely changes table size, be careful with overflow.
-    void rehash(size_t nmd) {
-        if (nmd == 0) nmd = 1;
+    void rehash(size_t new_size) {
+        if (new_size == 0) new_size = 1;
         std::vector<KeyValuePair> cop(begin(), end());
         clear();
-        hashmod_ = nmd;
+        hashmod_ = new_size;
         first_occ_ = std::vector<iterator>(hashmod_);
         used_ = std::vector<bool>(hashmod_);
         for (auto i : cop) add(i);
+    }
+
+    const_iterator find(const Key &k, size_t h) const {
+        if (!used_[h]) return end();
+        auto c = first_occ_[h];
+        while (c != end() && geth(c->first) == h) {
+            if (c->first == k) return c;
+            ++c;
+        }
+        return end();
+    }
+
+    iterator find(const Key &k, size_t h) {
+        if (!used_[h]) return end();
+        auto c = first_occ_[h];
+        while (c != end() && geth(c->first) == h) {
+            if (c->first == k) return c;
+            ++c;
+        }
+        return end();
+    }
+
+    // Returns if an element with Key k exists.
+    bool count(const Key &k, size_t h) const {
+        return find(k, h) != end();
+    }
+
+    void erase(iterator er, size_t h) {
+        if (first_occ_[h] == er) {
+            auto next = er;
+            ++next;
+            if (next == end() || geth(next->first) != h) {
+                used_[h] = false;
+            } else {
+                first_occ_[h] = next;
+            }
+        }
+        list_.erase(er);
     }
 
  public:
@@ -115,30 +160,11 @@ struct HashMap {
 
     // Returns an iterator to the element with Key k if exists, end() otherwise.
     const_iterator find(const Key &k) const {
-        size_t h = geth(k);
-        if (!used_[h]) return end();
-        auto c = first_occ_[h];
-        while (c != end() && geth(c->first) == h) {
-            if (c->first == k) return c;
-            ++c;
-        }
-        return end();
+        return find(k, geth(k));
     }
 
     iterator find(const Key &k) {
-        size_t h = geth(k);
-        if (!used_[h]) return end();
-        auto c = first_occ_[h];
-        while (c != end() && geth(c->first) == h) {
-            if (c->first == k) return c;
-            ++c;
-        }
-        return end();
-    }
-
-    // Returns if an element with Key k exists.
-    bool count(const Key &k) const {
-        return find(k) != end();
+        return find(k, geth(k));
     }
 
     bool empty() const { return list_.empty(); }
@@ -146,34 +172,33 @@ struct HashMap {
 
     // Adds an element if it doesn't exist.
     void insert(const KeyValuePair &p) {
-        if (!count(p.first)) add(p);
+        size_t h = geth(p.first);
+        if (!count(p.first, h)) add(p, h);
     }
 
     // Erases an element with the given iterator.
-    void erase(iterator er) {
-        if (first_occ_[geth(er->first)] == er) {
-            auto next = er;
-            ++next;
-            if (next == end() || geth(next->first) != geth(er->first))
-                used_[geth(er->first)] = false;
-            else
-                first_occ_[geth(er->first)] = next;
-        }
-        list_.erase(er);
+    void erase(iterator it) {
+        erase(it, geth(it->first));
     }
 
     // Erases the element with Key k.
     void erase(const Key &k) {
-        if (count(k)) {
+        size_t h = geth(k);
+        auto it = find(k, h);
+        if (it != end()) {
             --size_;
-            erase(find(k));
+            erase(it, h);
         }
     }
 
     // Returns the value associated to k if exists, creates default otherwise.
     Value& operator[](const Key &k) {
-        if (!count(k)) add(KeyValuePair(k, Value()));
-        return find(k)->second;
+        auto it = find(k);
+        if (it == end()) {
+            add(KeyValuePair(k, Value()));
+            return find(k)->second;
+        }
+        return it->second;
     }
 
     void clear() {
@@ -188,7 +213,8 @@ struct HashMap {
 
     // const operator[]
     const Value& at(const Key &k) const {
-        if (!count(k)) throw std::out_of_range("none");
-        return find(k)->second;
+        auto it = find(k);
+        if (it == end()) throw std::out_of_range("none");
+        return it->second;
     }
 };
